@@ -1,0 +1,1029 @@
+diff --git a/src/skynet/skynet-src/malloc_hook.c b/src/skynet/skynet-src/malloc_hook.c
+index da8a536..fbe2bd8 100644
+--- a/src/skynet/skynet-src/malloc_hook.c
++++ b/src/skynet/skynet-src/malloc_hook.c
+@@ -6,8 +6,16 @@
+ #include <stdio.h>
+ 
+ #include "malloc_hook.h"
+-#include "skynet.h"
++//
+ #include "atomic.h"
++#if 1
++void(*skynet_error_fn)(struct skynet_context * context, const char *msg, ...);
++#define skynet_error (*skynet_error_fn)
++uint32_t(*skynet_current_handle_fn)(void);
++#define skynet_current_handle (*skynet_current_handle_fn)
++#else
++#include "skynet.h"
++#endif
+ 
+ static size_t _used_memory = 0;
+ static size_t _memory_block = 0;
+@@ -21,6 +29,10 @@ typedef struct _mem_data {
+ 
+ static mem_data mem_stats[SLOT_SIZE];
+ 
++void skynet_memory_init(void* error_fn, void* handle_fn) {
++  skynet_error_fn = error_fn;
++  skynet_current_handle_fn = handle_fn;
++}
+ 
+ #ifndef NOUSE_JEMALLOC
+ 
+@@ -169,7 +181,18 @@ skynet_calloc(size_t nmemb,size_t size) {
+ }
+ 
+ #else
+-
++void * skynet_malloc(size_t sz) {
++  return malloc(sz);
++}
++void * skynet_calloc(size_t nmemb, size_t size) {
++  return calloc(nmemb, size);
++}
++void * skynet_realloc(void *ptr, size_t size) {
++  return realloc(ptr, size);
++}
++void skynet_free(void *ptr) {
++  free(ptr);
++}
+ // for skynet_lalloc use
+ #define raw_realloc realloc
+ #define raw_free free
+diff --git a/src/skynet/skynet-src/skynet-src.patch b/src/skynet/skynet-src/skynet-src.patch
+index 18ce834..e69de29 100644
+--- a/src/skynet/skynet-src/skynet-src.patch
++++ b/src/skynet/skynet-src/skynet-src.patch
+@@ -1,491 +0,0 @@
+-Index: skynet_error.c
+-===================================================================
+---- skynet_error.c	(revision 16373)
+-+++ skynet_error.c	(working copy)
+-@@ -32,13 +32,14 @@
+- 		data = skynet_strdup(tmp);
+- 	} else {
+- 		int max_size = LOG_MESSAGE_SIZE;
+--		for (;;) {
+-+    int i = 0;
+-+    for (; i < 5; ++i) {
+- 			max_size *= 2;
+- 			data = skynet_malloc(max_size);
+- 			va_start(ap,msg);
+- 			len = vsnprintf(data, max_size, msg, ap);
+- 			va_end(ap);
+--			if (len < max_size) {
+-+			if (len < max_size && len >= 0) {
+- 				break;
+- 			}
+- 			skynet_free(data);
+-Index: skynet_harbor.c
+-===================================================================
+---- skynet_harbor.c	(revision 16373)
+-+++ skynet_harbor.c	(working copy)
+-@@ -22,7 +22,7 @@
+- int 
+- skynet_harbor_message_isremote(uint32_t handle) {
+- 	assert(HARBOR != ~0);
+--	int h = (handle & ~HANDLE_MASK);
+-+  uint32_t h = (handle & ~HANDLE_MASK);
+- 	return h != HARBOR && h !=0;
+- }
+- 
+-Index: skynet_log.c
+-===================================================================
+---- skynet_log.c	(revision 16373)
+-+++ skynet_log.c	(working copy)
+-@@ -11,7 +11,11 @@
+- 	if (logpath == NULL)
+- 		return NULL;
+- 	size_t sz = strlen(logpath);
+-+#ifdef _MSC_VER
+-+  char tmp[1024 + 16];
+-+#else
+- 	char tmp[sz + 16];
+-+#endif
+- 	sprintf(tmp, "%s/%08x.log", logpath, handle);
+- 	FILE *f = fopen(tmp, "ab");
+- 	if (f) {
+-@@ -75,3 +79,39 @@
+- 		fflush(f);
+- 	}
+- }
+-+
+-+
+-+//////////////////////////////////////////////////////////////////////////
+-+//
+-+FILE* s_skynet_debug_log = NULL;
+-+
+-+void skynet_onexit() {
+-+  my_log_output("skynet exit!!!");
+-+  fclose(s_skynet_debug_log);
+-+  s_skynet_debug_log = NULL;
+-+}
+-+
+-+void my_log_init() {
+-+  //log文件名中加入pid和时间信息；
+-+  time_t now = time(NULL);
+-+  char Time[32] = { 0 };
+-+  strftime(Time, 20, "%Y%m%d%H%M%S", localtime(&now));
+-+  mkdir("log", 0777);
+-+  char logfile[256];
+-+  snprintf(logfile, sizeof(logfile), "log/skynet_%u_%s.debug", getpid(), Time);
+-+  //
+-+  s_skynet_debug_log = fopen(logfile, "w");
+-+  setvbuf(s_skynet_debug_log, NULL, _IONBF, 0);
+-+  atexit(skynet_onexit);
+-+}
+-+
+-+void my_log_output(char* log) {
+-+  time_t now = time(NULL);
+-+  char Time[32] = { 0 };
+-+  strftime(Time, 20, "%Y%m%d%H%M%S", localtime(&now));
+-+
+-+  fprintf(s_skynet_debug_log, "[%s] %s", Time, log);
+-+  fprintf(s_skynet_debug_log, "\n");
+-+  fflush(s_skynet_debug_log);
+-+}
+-+
+-Index: skynet_log.h
+-===================================================================
+---- skynet_log.h	(revision 16373)
+-+++ skynet_log.h	(working copy)
+-@@ -11,4 +11,8 @@
+- void skynet_log_close(struct skynet_context * ctx, FILE *f, uint32_t handle);
+- void skynet_log_output(FILE *f, uint32_t source, int type, int session, void * buffer, size_t sz);
+- 
+-+//////////////////////////////////////////////////////////////////////////
+-+//
+-+void my_log_init();
+-+void my_log_output(char* log);
+- #endif
+-\ No newline at end of file
+-Index: skynet_main.c
+-===================================================================
+---- skynet_main.c	(revision 16373)
+-+++ skynet_main.c	(working copy)
+-@@ -14,6 +14,9 @@
+- #include <signal.h>
+- #include <assert.h>
+- 
+-+#ifdef _MSC_VER
+-+#include "cpoll/cpoll.h"
+-+#endif
+- static int
+- optint(const char *key, int opt) {
+- 	const char * str = skynet_getenv(key);
+-@@ -70,7 +73,32 @@
+- 				fprintf(stderr, "Invalid config table key = %s\n", key);
+- 				exit(1);
+- 			}
+--			skynet_setenv(key,value);
+-+#ifdef _MSC_VER
+-+      if (!strcmp(key, "cpath") || !strcmp(key, "lua_cpath")) {
+-+        const char* p = value;
+-+        const char* src = "?.so";
+-+        const char* dst = "?.dll";
+-+        //
+-+        int src_len = strlen(src);
+-+        int dst_len = strlen(dst);
+-+        char buf[8 * 1024] = { 0 };
+-+        char* out = buf;
+-+        while (*p != '\0') {
+-+          if (strncmp(p, src, src_len) != 0) {
+-+            *out++ = *p++;
+-+          } else {
+-+            strcat(out, dst);
+-+            p += src_len;
+-+            out += dst_len;
+-+          }
+-+        }
+-+        skynet_setenv(key, buf);
+-+      } else {
+-+        skynet_setenv(key, value);
+-+      }
+-+#else
+-+      skynet_setenv(key, value);
+-+#endif
+- 		}
+- 		lua_pop(L,1);
+- 	}
+-@@ -106,6 +134,9 @@
+- 			"usage: skynet configfilename\n");
+- 		return 1;
+- 	}
+-+#ifdef _MSC_VER
+-+	cpoll_startup();
+-+#endif
+- 
+- 	luaS_initshr();
+- 	skynet_globalinit();
+-@@ -136,6 +167,7 @@
+- 	config.bootstrap = optstring("bootstrap","snlua bootstrap");
+- 	config.daemon = optstring("daemon", NULL);
+- 	config.logger = optstring("logger", NULL);
+-+	
+- 	config.logservice = optstring("logservice", "logger");
+- 
+- 	lua_close(L);
+-@@ -144,5 +176,8 @@
+- 	skynet_globalexit();
+- 	luaS_exitshr();
+- 
+-+#ifdef _MSC_VER
+-+	cpoll_cleanup();
+-+#endif
+- 	return 0;
+- }
+-Index: skynet_malloc.h
+-===================================================================
+---- skynet_malloc.h	(revision 16373)
+-+++ skynet_malloc.h	(working copy)
+-@@ -8,11 +8,16 @@
+- #define skynet_realloc realloc
+- #define skynet_free free
+- 
+-+#ifndef NOUSE_JEMALLOC
+- void * skynet_malloc(size_t sz);
+- void * skynet_calloc(size_t nmemb,size_t size);
+- void * skynet_realloc(void *ptr, size_t size);
+- void skynet_free(void *ptr);
+-+#endif
+- char * skynet_strdup(const char *str);
+- void * skynet_lalloc(void *ptr, size_t osize, size_t nsize);	// use for lua
+- 
+- #endif
+-+#ifdef _MSC_VER
+-+#include <unistd.h>
+-+#endif
+-Index: skynet_module.c
+-===================================================================
+---- skynet_module.c	(revision 16373)
+-+++ skynet_module.c	(working copy)
+-@@ -31,7 +31,12 @@
+- 	int sz = path_size + name_size;
+- 	//search path
+- 	void * dl = NULL;
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char tmp[1024];
+-+#else
+- 	char tmp[sz];
+-+#endif
+- 	do
+- 	{
+- 		memset(tmp,0,sz);
+-@@ -76,7 +81,12 @@
+- static int
+- _open_sym(struct skynet_module *mod) {
+- 	size_t name_size = strlen(mod->name);
+-+#ifdef _MSC_VER
+-+	assert(name_size <= 1024);
+-+	char tmp[1024 + 9]; // create/init/release/signal , longest name is release (7)
+-+#else
+- 	char tmp[name_size + 9]; // create/init/release/signal , longest name is release (7)
+-+#endif
+- 	memcpy(tmp, mod->name, name_size);
+- 	strcpy(tmp+name_size, "_create");
+- 	mod->create = dlsym(mod->module, tmp);
+-Index: skynet_server.c
+-===================================================================
+---- skynet_server.c	(revision 16373)
+-+++ skynet_server.c	(working copy)
+-@@ -411,8 +411,14 @@
+- static const char *
+- cmd_name(struct skynet_context * context, const char * param) {
+- 	int size = strlen(param);
+-+#ifdef _MSC_VER
+-+	assert(size <= 1024);
+-+	char name[1024+1];
+-+	char handle[1024+1];
+-+#else
+- 	char name[size+1];
+- 	char handle[size+1];
+-+#endif
+- 	sscanf(param,"%s %s",name,handle);
+- 	if (handle[0] != ':') {
+- 		return NULL;
+-@@ -461,7 +467,12 @@
+- static const char *
+- cmd_launch(struct skynet_context * context, const char * param) {
+- 	size_t sz = strlen(param);
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char tmp[1024+1];
+-+#else
+- 	char tmp[sz+1];
+-+#endif
+- 	strcpy(tmp,param);
+- 	char * args = tmp;
+- 	char * mod = strsep(&args, " \t\r\n");
+-@@ -483,7 +494,12 @@
+- static const char *
+- cmd_setenv(struct skynet_context * context, const char * param) {
+- 	size_t sz = strlen(param);
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char key[1024+1];
+-+#else
+- 	char key[sz+1];
+-+#endif
+- 	int i;
+- 	for (i=0;param[i] != ' ' && param[i];i++) {
+- 		key[i] = param[i];
+-Index: skynet_start.c
+-===================================================================
+---- skynet_start.c	(revision 16373)
+-+++ skynet_start.c	(working copy)
+-@@ -92,15 +92,19 @@
+- 
+- static void *
+- thread_monitor(void *p) {
+-+#ifndef _DEBUG
+- 	struct monitor * m = p;
+--	int i;
+- 	int n = m->count;
+-+#endif
+-+	int i = 0;
+- 	skynet_initthread(THREAD_MONITOR);
+- 	for (;;) {
+- 		CHECK_ABORT
+-+#ifndef _DEBUG
+- 		for (i=0;i<n;i++) {
+- 			skynet_monitor_check(m->m[i]);
+- 		}
+-+#endif
+- 		for (i=0;i<5;i++) {
+- 			CHECK_ABORT
+- 			sleep(1);
+-@@ -180,7 +184,12 @@
+- 
+- static void
+- start(int thread) {
+-+#ifdef _MSC_VER
+-+	assert(thread <= 32);
+-+	pthread_t pid[32+3];
+-+#else
+- 	pthread_t pid[thread+3];
+-+#endif
+- 
+- 	struct monitor *m = skynet_malloc(sizeof(*m));
+- 	memset(m, 0, sizeof(*m));
+-@@ -210,7 +219,11 @@
+- 		1, 1, 1, 1, 1, 1, 1, 1, 
+- 		2, 2, 2, 2, 2, 2, 2, 2, 
+- 		3, 3, 3, 3, 3, 3, 3, 3, };
+-+#ifdef _MSC_VER
+-+	struct worker_parm wp[32];
+-+#else
+- 	struct worker_parm wp[thread];
+-+#endif
+- 	for (i=0;i<thread;i++) {
+- 		wp[i].m = m;
+- 		wp[i].id = i;
+-@@ -232,8 +245,14 @@
+- static void
+- bootstrap(struct skynet_context * logger, const char * cmdline) {
+- 	int sz = strlen(cmdline);
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char name[1024+1];
+-+	char args[1024+1];
+-+#else
+- 	char name[sz+1];
+- 	char args[sz+1];
+-+#endif
+- 	sscanf(cmdline, "%s %s", name, args);
+- 	struct skynet_context *ctx = skynet_context_new(name, args);
+- 	if (ctx == NULL) {
+-Index: skynet_timer.c
+-===================================================================
+---- skynet_timer.c	(revision 16373)
+-+++ skynet_timer.c	(working copy)
+-@@ -270,7 +270,7 @@
+- 		uint32_t diff = (uint32_t)(cp - TI->current_point);
+- 		TI->current_point = cp;
+- 		TI->current += diff;
+--		int i;
+-+    uint32_t i;
+- 		for (i=0;i<diff;i++) {
+- 			timer_update(TI);
+- 		}
+-Index: socket_cpoll.h
+-===================================================================
+---- socket_cpoll.h	(revision 0)
+-+++ socket_cpoll.h	(working copy)
+-@@ -0,0 +1,73 @@
+-+#ifndef poll_socket_epoll_h
+-+#define poll_socket_epoll_h
+-+
+-+#include <unistd.h>
+-+#include <sys/types.h>
+-+#include <sys/socket.h>
+-+#include <netinet/in.h>
+-+#include <arpa/inet.h>
+-+#include <fcntl.h>
+-+#include "cpoll/cpoll.h"
+-+
+-+static bool 
+-+sp_invalid(int efd) {
+-+	return efd == -1;
+-+}
+-+
+-+static int
+-+sp_create() {
+-+	return cpoll_create(1024);
+-+}
+-+
+-+static void
+-+sp_release(int efd) {
+-+	close(efd);
+-+}
+-+
+-+static int 
+-+sp_add(int efd, int sock, void *ud) {
+-+	struct cpoll_event ev;
+-+	ev.events = CPOLLIN;
+-+	ev.data.ptr = ud;
+-+	if (cpoll_ctl(efd, CPOLL_CTL_ADD, sock, &ev) == -1) {
+-+		return 1;
+-+	}
+-+	return 0;
+-+}
+-+
+-+static void 
+-+sp_del(int efd, int sock) {
+-+	cpoll_ctl(efd, CPOLL_CTL_DEL, sock , NULL);
+-+}
+-+
+-+static void 
+-+sp_write(int efd, int sock, void *ud, bool enable) {
+-+	struct cpoll_event ev;
+-+	ev.events = CPOLLIN | (enable ? CPOLLOUT : 0);
+-+	ev.data.ptr = ud;
+-+	cpoll_ctl(efd, CPOLL_CTL_MOD, sock, &ev);
+-+}
+-+
+-+static int 
+-+sp_wait(int efd, struct event *e, int max) {
+-+	assert(max <= 1024);
+-+	struct cpoll_event ev[1024];
+-+	int n = cpoll_wait(efd , ev, max, -1);
+-+	int i;
+-+	for (i=0;i<n;i++) {
+-+		e[i].s = ev[i].data.ptr;
+-+		unsigned flag = ev[i].events;
+-+		e[i].write = (flag & CPOLLOUT) != 0;
+-+		e[i].read = (flag & CPOLLIN) != 0;
+-+	}
+-+
+-+	return n;
+-+}
+-+
+-+static void
+-+sp_nonblocking(int fd) {
+-+  u_long ul = 1;
+-+	ioctlsocket(fd, FIONBIO, &ul);
+-+}
+-+
+-+#endif
+-Index: socket_poll.h
+-===================================================================
+---- socket_poll.h	(revision 16373)
+-+++ socket_poll.h	(working copy)
+-@@ -20,6 +20,10 @@
+- static int sp_wait(poll_fd, struct event *e, int max);
+- static void sp_nonblocking(int sock);
+- 
+-+#ifdef _MSC_VER
+-+#include "socket_cpoll.h"
+-+#endif
+-+
+- #ifdef __linux__
+- #include "socket_epoll.h"
+- #endif
+-Index: socket_server.c
+-===================================================================
+---- socket_server.c	(revision 16373)
+-+++ socket_server.c	(working copy)
+-@@ -78,7 +78,7 @@
+- 	int fd;
+- 	int id;
+- 	uint16_t protocol;
+--	uint16_t type;
+-+  uint32_t type;
+- 	union {
+- 		int size;
+- 		uint8_t udp_address[UDP_ADDRESS_SIZE];
+-@@ -311,7 +311,9 @@
+- 	ss->event_index = 0;
+- 	memset(&ss->soi, 0, sizeof(ss->soi));
+- 	FD_ZERO(&ss->rfds);
+-+#ifndef _MSC_VER
+- 	assert(ss->recvctrl_fd < FD_SETSIZE);
+-+#endif
+- 
+- 	return ss;
+- }
+-@@ -430,7 +432,11 @@
+- 		socket_keepalive(sock);
+- 		sp_nonblocking(sock);
+- 		status = connect( sock, ai_ptr->ai_addr, ai_ptr->ai_addrlen);
+--		if ( status != 0 && errno != EINPROGRESS) {
+-+#ifdef _MSC_VER    
+-+    if (status != 0 && WSAGetLastError() != WSAEWOULDBLOCK) {
+-+#else
+-+    if (status != 0 && errno != EINPROGRESS) {
+-+#endif
+- 			close(sock);
+- 			sock = -1;
+- 			continue;
+-@@ -1064,7 +1070,7 @@
+- forward_message_udp(struct socket_server *ss, struct socket *s, struct socket_message * result) {
+- 	union sockaddr_all sa;
+- 	socklen_t slen = sizeof(sa);
+--	int n = recvfrom(s->fd, ss->udpbuffer,MAX_UDP_PACKAGE,0,&sa.s,&slen);
+-+	int n = recvfrom(s->fd, (void*)ss->udpbuffer,MAX_UDP_PACKAGE,0,&sa.s,&slen);
+- 	if (n<0) {
+- 		switch(errno) {
+- 		case EINTR:
+diff --git a/src/skynet/skynet-src/skynet_env.c b/src/skynet/skynet-src/skynet_env.c
+index a5882f2..3acf93c 100644
+--- a/src/skynet/skynet-src/skynet_env.c
++++ b/src/skynet/skynet-src/skynet_env.c
+@@ -46,6 +46,10 @@ skynet_setenv(const char *key, const char *value) {
+ 
+ void
+ skynet_env_init() {
++  //Modify Begin
++  //by ZC. 2016-12-16 15:37.
++  skynet_memory_init(skynet_error, skynet_current_handle);
++  //Modify End
+ 	E = skynet_malloc(sizeof(*E));
+ 	SPIN_INIT(E)
+ 	E->L = luaL_newstate();
+diff --git a/src/skynet/skynet-src/skynet_error.c b/src/skynet/skynet-src/skynet_error.c
+index 856c470..65807f9 100644
+--- a/src/skynet/skynet-src/skynet_error.c
++++ b/src/skynet/skynet-src/skynet_error.c
+@@ -32,13 +32,14 @@ skynet_error(struct skynet_context * context, const char *msg, ...) {
+ 		data = skynet_strdup(tmp);
+ 	} else {
+ 		int max_size = LOG_MESSAGE_SIZE;
+-		for (;;) {
++    int i = 0;
++    for (; i < 5; ++i) {
+ 			max_size *= 2;
+ 			data = skynet_malloc(max_size);
+ 			va_start(ap,msg);
+ 			len = vsnprintf(data, max_size, msg, ap);
+ 			va_end(ap);
+-			if (len < max_size) {
++			if (len < max_size && len >= 0) {
+ 				break;
+ 			}
+ 			skynet_free(data);
+diff --git a/src/skynet/skynet-src/skynet_harbor.c b/src/skynet/skynet-src/skynet_harbor.c
+index 5e39ca6..fd0949b 100644
+--- a/src/skynet/skynet-src/skynet_harbor.c
++++ b/src/skynet/skynet-src/skynet_harbor.c
+@@ -22,7 +22,7 @@ skynet_harbor_send(struct remote_message *rmsg, uint32_t source, int session) {
+ int 
+ skynet_harbor_message_isremote(uint32_t handle) {
+ 	assert(HARBOR != ~0);
+-	int h = (handle & ~HANDLE_MASK);
++  uint32_t h = (handle & ~HANDLE_MASK);
+ 	return h != HARBOR && h !=0;
+ }
+ 
+diff --git a/src/skynet/skynet-src/skynet_harbor.h b/src/skynet/skynet-src/skynet_harbor.h
+index 97a76c2..0a395eb 100644
+--- a/src/skynet/skynet-src/skynet_harbor.h
++++ b/src/skynet/skynet-src/skynet_harbor.h
+@@ -4,7 +4,7 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ 
+-#define GLOBALNAME_LENGTH 16
++#define GLOBALNAME_LENGTH 32
+ #define REMOTE_MAX 256
+ 
+ struct remote_name {
+diff --git a/src/skynet/skynet-src/skynet_log.c b/src/skynet/skynet-src/skynet_log.c
+index 4ce106f..62ffeb3 100644
+--- a/src/skynet/skynet-src/skynet_log.c
++++ b/src/skynet/skynet-src/skynet_log.c
+@@ -11,7 +11,11 @@ skynet_log_open(struct skynet_context * ctx, uint32_t handle) {
+ 	if (logpath == NULL)
+ 		return NULL;
+ 	size_t sz = strlen(logpath);
++#ifdef _MSC_VER
++  char tmp[1024 + 16];
++#else
+ 	char tmp[sz + 16];
++#endif
+ 	sprintf(tmp, "%s/%08x.log", logpath, handle);
+ 	FILE *f = fopen(tmp, "ab");
+ 	if (f) {
+@@ -75,3 +79,39 @@ skynet_log_output(FILE *f, uint32_t source, int type, int session, void * buffer
+ 		fflush(f);
+ 	}
+ }
++
++
++//////////////////////////////////////////////////////////////////////////
++//
++FILE* s_skynet_debug_log = NULL;
++
++void skynet_onexit() {
++  my_log_output("skynet exit!!!");
++  fclose(s_skynet_debug_log);
++  s_skynet_debug_log = NULL;
++}
++
++void my_log_init() {
++  //log文件名中加入pid和时间信息；
++  time_t now = time(NULL);
++  char Time[32] = { 0 };
++  strftime(Time, 20, "%Y%m%d%H%M%S", localtime(&now));
++  mkdir("log", 0777);
++  char logfile[256];
++  snprintf(logfile, sizeof(logfile), "log/skynet_%u_%s.debug", getpid(), Time);
++  //
++  s_skynet_debug_log = fopen(logfile, "w");
++  setvbuf(s_skynet_debug_log, NULL, _IONBF, 0);
++  atexit(skynet_onexit);
++}
++
++void my_log_output(char* log) {
++  time_t now = time(NULL);
++  char Time[32] = { 0 };
++  strftime(Time, 20, "%Y%m%d%H%M%S", localtime(&now));
++
++  fprintf(s_skynet_debug_log, "[%s] %s", Time, log);
++  fprintf(s_skynet_debug_log, "\n");
++  fflush(s_skynet_debug_log);
++}
++
+diff --git a/src/skynet/skynet-src/skynet_log.h b/src/skynet/skynet-src/skynet_log.h
+index 41ddeda..25d3d45 100644
+--- a/src/skynet/skynet-src/skynet_log.h
++++ b/src/skynet/skynet-src/skynet_log.h
+@@ -11,4 +11,8 @@ FILE * skynet_log_open(struct skynet_context * ctx, uint32_t handle);
+ void skynet_log_close(struct skynet_context * ctx, FILE *f, uint32_t handle);
+ void skynet_log_output(FILE *f, uint32_t source, int type, int session, void * buffer, size_t sz);
+ 
++//////////////////////////////////////////////////////////////////////////
++//
++void my_log_init();
++void my_log_output(char* log);
+ #endif
+\ No newline at end of file
+diff --git a/src/skynet/skynet-src/skynet_main.c b/src/skynet/skynet-src/skynet_main.c
+index f3ce56b..4f382dd 100644
+--- a/src/skynet/skynet-src/skynet_main.c
++++ b/src/skynet/skynet-src/skynet_main.c
+@@ -14,6 +14,9 @@
+ #include <signal.h>
+ #include <assert.h>
+ 
++#ifdef _MSC_VER
++#include "cpoll/cpoll.h"
++#endif
+ static int
+ optint(const char *key, int opt) {
+ 	const char * str = skynet_getenv(key);
+@@ -68,7 +71,45 @@ _init_env(lua_State *L) {
+ 				fprintf(stderr, "Invalid config table key = %s\n", key);
+ 				exit(1);
+ 			}
+-			skynet_setenv(key,value);
++#if 1
++      // 将Debug与Release目录统一起来，方便conf配置。by ZC. 2016-9-22
++      if (!strcmp(key, "cpath") || !strcmp(key, "lua_cpath")) {
++        const char* p = value;
++        const char* src = "build/Release/?.so";
++#ifdef _MSC_VER
++#ifdef _DEBUG
++        const char* dst = "build/Debug/?.dll";
++#else
++        const char* dst = "build/Release/?.dll";
++#endif // _DEBUG
++#else
++#ifdef _DEBUG
++        const char* dst = "build_linux/Debug/?.so";
++#else
++        const char* dst = "build_linux/Release/?.so";
++#endif // _DEBUG
++#endif // _MSC_VER
++        //
++        int src_len = strlen(src);
++        int dst_len = strlen(dst);
++        char buf[8 * 1024] = { 0 };
++        char* out = buf;
++        while (*p != '\0') {
++          if (strncmp(p, src, src_len) != 0) {
++            *out++ = *p++;
++          } else {
++            strcat(out, dst);
++            p += src_len;
++            out += dst_len;
++          }
++        }
++        skynet_setenv(key, buf);
++      } else {
++        skynet_setenv(key, value);
++      }
++#else
++      skynet_setenv(key, value);
++#endif
+ 		}
+ 		lua_pop(L,1);
+ 	}
+@@ -90,7 +131,9 @@ static const char * load_config = "\
+ 	code = string.gsub(code, \'%$([%w_%d]+)\', getenv)\
+ 	f:close()\
+ 	local result = {}\
++  function result.include(name) assert(loadfile(name, \"t\", result))() end  \
+ 	assert(load(code,\'=(load)\',\'t\',result))()\
++  result.include = nil\
+ 	return result\
+ ";
+ 
+@@ -99,11 +142,15 @@ main(int argc, char *argv[]) {
+ 	const char * config_file = NULL ;
+ 	if (argc > 1) {
+ 		config_file = argv[1];
++		fprintf(stdout, "skynet config:%s\n", config_file);
+ 	} else {
+ 		fprintf(stderr, "Need a config file. Please read skynet wiki : https://github.com/cloudwu/skynet/wiki/Config\n"
+ 			"usage: skynet configfilename\n");
+ 		return 1;
+ 	}
++#ifdef _MSC_VER
++	cpoll_startup();
++#endif
+ 
+ 	luaS_initshr();
+ 	skynet_globalinit();
+@@ -130,7 +177,7 @@ main(int argc, char *argv[]) {
+ 
+ 	config.thread =  optint("thread",8);
+ 	config.module_path = optstring("cpath","./cservice/?.so");
+-	config.harbor = optint("harbor", 1);
++	config.harbor = optint("harbor", 0);
+ 	config.bootstrap = optstring("bootstrap","snlua bootstrap");
+ 	config.daemon = optstring("daemon", NULL);
+ 	config.logger = optstring("logger", NULL);
+@@ -143,5 +190,8 @@ main(int argc, char *argv[]) {
+ 	skynet_globalexit();
+ 	luaS_exitshr();
+ 
++#ifdef _MSC_VER
++	cpoll_cleanup();
++#endif
+ 	return 0;
+ }
+diff --git a/src/skynet/skynet-src/skynet_malloc.h b/src/skynet/skynet-src/skynet_malloc.h
+index 7bafa40..a05e01b 100644
+--- a/src/skynet/skynet-src/skynet_malloc.h
++++ b/src/skynet/skynet-src/skynet_malloc.h
+@@ -3,16 +3,22 @@
+ 
+ #include <stddef.h>
+ 
+-#define skynet_malloc malloc
+-#define skynet_calloc calloc
+-#define skynet_realloc realloc
+-#define skynet_free free
++#ifdef __cplusplus
++extern "C" {
++#endif
+ 
++void skynet_memory_init(void* error_fn, void* handle_fn);
+ void * skynet_malloc(size_t sz);
+ void * skynet_calloc(size_t nmemb,size_t size);
+ void * skynet_realloc(void *ptr, size_t size);
+ void skynet_free(void *ptr);
+ char * skynet_strdup(const char *str);
+ void * skynet_lalloc(void *ptr, size_t osize, size_t nsize);	// use for lua
++#ifdef __cplusplus
++}
++#endif
+ 
+ #endif
++#ifdef _MSC_VER
++#include <unistd.h>
++#endif
+diff --git a/src/skynet/skynet-src/skynet_module.c b/src/skynet/skynet-src/skynet_module.c
+index d586427..0d91d30 100644
+--- a/src/skynet/skynet-src/skynet_module.c
++++ b/src/skynet/skynet-src/skynet_module.c
+@@ -31,7 +31,12 @@ _try_open(struct modules *m, const char * name) {
+ 	int sz = path_size + name_size;
+ 	//search path
+ 	void * dl = NULL;
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char tmp[1024];
++#else
+ 	char tmp[sz];
++#endif
+ 	do
+ 	{
+ 		memset(tmp,0,sz);
+@@ -76,7 +81,12 @@ _query(const char * name) {
+ static int
+ _open_sym(struct skynet_module *mod) {
+ 	size_t name_size = strlen(mod->name);
++#ifdef _MSC_VER
++	assert(name_size <= 1024);
++	char tmp[1024 + 9]; // create/init/release/signal , longest name is release (7)
++#else
+ 	char tmp[name_size + 9]; // create/init/release/signal , longest name is release (7)
++#endif
+ 	memcpy(tmp, mod->name, name_size);
+ 	strcpy(tmp+name_size, "_create");
+ 	mod->create = dlsym(mod->module, tmp);
+diff --git a/src/skynet/skynet-src/skynet_server.c b/src/skynet/skynet-src/skynet_server.c
+index d730d1d..d720f36 100644
+--- a/src/skynet/skynet-src/skynet_server.c
++++ b/src/skynet/skynet-src/skynet_server.c
+@@ -432,8 +432,14 @@ cmd_query(struct skynet_context * context, const char * param) {
+ static const char *
+ cmd_name(struct skynet_context * context, const char * param) {
+ 	int size = strlen(param);
++#ifdef _MSC_VER
++	assert(size <= 1024);
++	char name[1024+1];
++	char handle[1024+1];
++#else
+ 	char name[size+1];
+ 	char handle[size+1];
++#endif
+ 	sscanf(param,"%s %s",name,handle);
+ 	if (handle[0] != ':') {
+ 		return NULL;
+@@ -482,7 +488,12 @@ cmd_kill(struct skynet_context * context, const char * param) {
+ static const char *
+ cmd_launch(struct skynet_context * context, const char * param) {
+ 	size_t sz = strlen(param);
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char tmp[1024+1];
++#else
+ 	char tmp[sz+1];
++#endif
+ 	strcpy(tmp,param);
+ 	char * args = tmp;
+ 	char * mod = strsep(&args, " \t\r\n");
+@@ -504,7 +515,12 @@ cmd_getenv(struct skynet_context * context, const char * param) {
+ static const char *
+ cmd_setenv(struct skynet_context * context, const char * param) {
+ 	size_t sz = strlen(param);
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char key[1024+1];
++#else
+ 	char key[sz+1];
++#endif
+ 	int i;
+ 	for (i=0;param[i] != ' ' && param[i];i++) {
+ 		key[i] = param[i];
+diff --git a/src/skynet/skynet-src/skynet_start.c b/src/skynet/skynet-src/skynet_start.c
+index 2f5ddea..fda189c 100644
+--- a/src/skynet/skynet-src/skynet_start.c
++++ b/src/skynet/skynet-src/skynet_start.c
+@@ -92,15 +92,19 @@ free_monitor(struct monitor *m) {
+ 
+ static void *
+ thread_monitor(void *p) {
++#ifndef _DEBUG
+ 	struct monitor * m = p;
+-	int i;
+ 	int n = m->count;
++#endif
++	int i = 0;
+ 	skynet_initthread(THREAD_MONITOR);
+ 	for (;;) {
+ 		CHECK_ABORT
++#ifndef _DEBUG
+ 		for (i=0;i<n;i++) {
+ 			skynet_monitor_check(m->m[i]);
+ 		}
++#endif
+ 		for (i=0;i<5;i++) {
+ 			CHECK_ABORT
+ 			sleep(1);
+@@ -180,7 +184,12 @@ thread_worker(void *p) {
+ 
+ static void
+ start(int thread) {
++#ifdef _MSC_VER
++	assert(thread <= 32);
++	pthread_t pid[32+3];
++#else
+ 	pthread_t pid[thread+3];
++#endif
+ 
+ 	struct monitor *m = skynet_malloc(sizeof(*m));
+ 	memset(m, 0, sizeof(*m));
+@@ -210,7 +219,11 @@ start(int thread) {
+ 		1, 1, 1, 1, 1, 1, 1, 1, 
+ 		2, 2, 2, 2, 2, 2, 2, 2, 
+ 		3, 3, 3, 3, 3, 3, 3, 3, };
++#ifdef _MSC_VER
++	struct worker_parm wp[32];
++#else
+ 	struct worker_parm wp[thread];
++#endif
+ 	for (i=0;i<thread;i++) {
+ 		wp[i].m = m;
+ 		wp[i].id = i;
+@@ -232,8 +245,14 @@ start(int thread) {
+ static void
+ bootstrap(struct skynet_context * logger, const char * cmdline) {
+ 	int sz = strlen(cmdline);
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char name[1024+1];
++	char args[1024+1];
++#else
+ 	char name[sz+1];
+ 	char args[sz+1];
++#endif
+ 	sscanf(cmdline, "%s %s", name, args);
+ 	struct skynet_context *ctx = skynet_context_new(name, args);
+ 	if (ctx == NULL) {
+diff --git a/src/skynet/skynet-src/socket_poll.h b/src/skynet/skynet-src/socket_poll.h
+index 0f36308..c7773c9 100644
+--- a/src/skynet/skynet-src/socket_poll.h
++++ b/src/skynet/skynet-src/socket_poll.h
+@@ -20,6 +20,10 @@ static void sp_write(poll_fd, int sock, void *ud, bool enable);
+ static int sp_wait(poll_fd, struct event *e, int max);
+ static void sp_nonblocking(int sock);
+ 
++#ifdef _MSC_VER
++#include "socket_cpoll.h"
++#endif
++
+ #ifdef __linux__
+ #include "socket_epoll.h"
+ #endif
+diff --git a/src/skynet/skynet-src/socket_server.c b/src/skynet/skynet-src/socket_server.c
+index d1f5596..88e7134 100644
+--- a/src/skynet/skynet-src/socket_server.c
++++ b/src/skynet/skynet-src/socket_server.c
+@@ -78,7 +78,7 @@ struct socket {
+ 	int fd;
+ 	int id;
+ 	uint16_t protocol;
+-	uint16_t type;
++  uint32_t type;
+ 	union {
+ 		int size;
+ 		uint8_t udp_address[UDP_ADDRESS_SIZE];
+@@ -311,7 +311,9 @@ socket_server_create() {
+ 	ss->event_index = 0;
+ 	memset(&ss->soi, 0, sizeof(ss->soi));
+ 	FD_ZERO(&ss->rfds);
++#ifndef _MSC_VER
+ 	assert(ss->recvctrl_fd < FD_SETSIZE);
++#endif
+ 
+ 	return ss;
+ }
+@@ -430,7 +432,11 @@ open_socket(struct socket_server *ss, struct request_open * request, struct sock
+ 		socket_keepalive(sock);
+ 		sp_nonblocking(sock);
+ 		status = connect( sock, ai_ptr->ai_addr, ai_ptr->ai_addrlen);
+-		if ( status != 0 && errno != EINPROGRESS) {
++#ifdef _MSC_VER    
++    if (status != 0 && WSAGetLastError() != WSAEWOULDBLOCK) {
++#else
++    if (status != 0 && errno != EINPROGRESS) {
++#endif
+ 			close(sock);
+ 			sock = -1;
+ 			continue;
+@@ -1064,7 +1070,7 @@ static int
+ forward_message_udp(struct socket_server *ss, struct socket *s, struct socket_message * result) {
+ 	union sockaddr_all sa;
+ 	socklen_t slen = sizeof(sa);
+-	int n = recvfrom(s->fd, ss->udpbuffer,MAX_UDP_PACKAGE,0,&sa.s,&slen);
++	int n = recvfrom(s->fd, (void*)ss->udpbuffer,MAX_UDP_PACKAGE,0,&sa.s,&slen);
+ 	if (n<0) {
+ 		switch(errno) {
+ 		case EINTR:
+@@ -1125,6 +1131,11 @@ report_connect(struct socket_server *ss, struct socket *s, struct socket_message
+ 		if (getpeername(s->fd, &u.s, &slen) == 0) {
+ 			void * sin_addr = (u.s.sa_family == AF_INET) ? (void*)&u.v4.sin_addr : (void *)&u.v6.sin6_addr;
+ 			if (inet_ntop(u.s.sa_family, sin_addr, ss->buffer, sizeof(ss->buffer))) {
++        //Modify Begin
++        //by ZC. 2016-9-20 10:25.
++        int sin_port = ntohs((u.s.sa_family == AF_INET) ? u.v4.sin_port : u.v6.sin6_port);
++        snprintf(ss->buffer + strlen(ss->buffer), sizeof(ss->buffer), ":%d", sin_port);
++        //Modify End
+ 				result->data = ss->buffer;
+ 				return SOCKET_OPEN;
+ 			}

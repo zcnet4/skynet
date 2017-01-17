@@ -1,0 +1,444 @@
+diff --git a/src/skynet/service-src/databuffer.h b/src/skynet/service-src/databuffer.h
+index 1563466..2ce2ad3 100644
+--- a/src/skynet/service-src/databuffer.h
++++ b/src/skynet/service-src/databuffer.h
+@@ -82,7 +82,12 @@ databuffer_read(struct databuffer *db, struct messagepool *mp, void * buffer, in
+ 			memcpy(buffer, current->buffer + db->offset, bsz);
+ 			_return_message(db, mp);
+ 			db->offset = 0;
++#ifdef _MSC_VER
++      char* p = (char*)buffer + bsz;
++      buffer = p;
++#else
+ 			buffer+=bsz;
++#endif
+ 			sz-=bsz;
+ 		}
+ 	}
+diff --git a/src/skynet/service-src/hashmap.h b/src/skynet/service-src/hashmap.h
+index f38c14c..ff7c86d 100644
+--- a/src/skynet/service-src/hashmap.h
++++ b/src/skynet/service-src/hashmap.h
+@@ -1,5 +1,5 @@
+ /* -------------------------------------------------------------------------
+-//	FileName		:	d:\yy_code\strife\server\src\server\skynet\service-src\hashmap.h
++//	FileName		:	d:\yx_code\yx\skynet\service-src\hashmap.h
+ //	Creator			:	(zc)
+ //	CreateTime	:	2016-9-18 9:20
+ //	Description	:	
+diff --git a/src/skynet/service-src/service-src.patch b/src/skynet/service-src/service-src.patch
+index 405a392..e69de29 100644
+--- a/src/skynet/service-src/service-src.patch
++++ b/src/skynet/service-src/service-src.patch
+@@ -1,214 +0,0 @@
+-Index: databuffer.h
+-===================================================================
+---- databuffer.h	(revision 16373)
+-+++ databuffer.h	(working copy)
+-@@ -82,7 +82,12 @@
+- 			memcpy(buffer, current->buffer + db->offset, bsz);
+- 			_return_message(db, mp);
+- 			db->offset = 0;
+-+#ifdef _MSC_VER
+-+      char* p = (char*)buffer + bsz;
+-+      buffer = p;
+-+#else
+- 			buffer+=bsz;
+-+#endif
+- 			sz-=bsz;
+- 		}
+- 	}
+-Index: service_gate.c
+-===================================================================
+---- service_gate.c	(revision 16373)
+-+++ service_gate.c	(working copy)
+-@@ -88,7 +88,12 @@
+- static void
+- _ctrl(struct gate * g, const void * msg, int sz) {
+- 	struct skynet_context * ctx = g->ctx;
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char tmp[1024+1];
+-+#else
+- 	char tmp[sz+1];
+-+#endif
+- 	memcpy(tmp, msg, sz);
+- 	tmp[sz] = '\0';
+- 	char * command = tmp;
+-@@ -284,7 +289,7 @@
+- 			break;
+- 		}
+- 		// The last 4 bytes in msg are the id of socket, write following bytes to it
+--		const uint8_t * idbuf = msg + sz - 4;
+-+		const uint8_t * idbuf = (const uint8_t *)msg + sz - 4;
+- 		uint32_t uid = idbuf[0] | idbuf[1] << 8 | idbuf[2] << 16 | idbuf[3] << 24;
+- 		int id = hashid_lookup(&g->hash, uid);
+- 		if (id>=0) {
+-@@ -340,8 +345,14 @@
+- 		return 1;
+- 	int max = 0;
+- 	int sz = strlen(parm)+1;
+-+#ifdef _MSC_VER
+-+	assert(sz <= 1024);
+-+	char watchdog[1024];
+-+	char binding[1024];
+-+#else
+- 	char watchdog[sz];
+- 	char binding[sz];
+-+#endif
+- 	int client_tag = 0;
+- 	char header;
+- 	int n = sscanf(parm, "%c %s %s %d %d", &header, watchdog, binding, &client_tag, &max);
+-Index: service_harbor.c
+-===================================================================
+---- service_harbor.c	(revision 16373)
+-+++ service_harbor.c	(working copy)
+-@@ -345,7 +345,7 @@
+- dispatch_name_queue(struct harbor *h, struct keyvalue * node) {
+- 	struct harbor_msg_queue * queue = node->queue;
+- 	uint32_t handle = node->value;
+--	int harbor_id = handle >> HANDLE_REMOTE_SHIFT;
+-+  uint32_t harbor_id = handle >> HANDLE_REMOTE_SHIFT;
+- 	struct skynet_context * context = h->ctx;
+- 	struct slave *s = &h->s[harbor_id];
+- 	int fd = s->fd;
+-@@ -606,7 +606,12 @@
+- 	}
+- 	case 'S' :
+- 	case 'A' : {
+-+#ifdef _MSC_VER
+-+		assert(s <= 1024);
+-+		char buffer[1024+1];
+-+#else
+- 		char buffer[s+1];
+-+#endif
+- 		memcpy(buffer, name, s);
+- 		buffer[s] = 0;
+- 		int fd=0, id=0;
+-Index: service_logger.c
+-===================================================================
+---- service_logger.c	(revision 16373)
+-+++ service_logger.c	(working copy)
+-@@ -1,13 +1,18 @@
+- #include "skynet.h"
+-+#include "skynet_env.h"
+- 
+- #include <stdio.h>
+- #include <stdlib.h>
+- #include <stdint.h>
+--#include <string.h>
+-+#include <time.h>
+- 
+-+#ifdef _MSC_VER
+-+#include <direct.h>
+-+#include <Windows.h>
+-+#include <locale.h>
+-+#endif
+- struct logger {
+- 	FILE * handle;
+--	char * filename;
+- 	int close;
+- };
+- 
+-@@ -16,8 +21,6 @@
+- 	struct logger * inst = skynet_malloc(sizeof(*inst));
+- 	inst->handle = NULL;
+- 	inst->close = 0;
+--	inst->filename = NULL;
+--
+- 	return inst;
+- }
+- 
+-@@ -26,45 +29,63 @@
+- 	if (inst->close) {
+- 		fclose(inst->handle);
+- 	}
+--	skynet_free(inst->filename);
+- 	skynet_free(inst);
+- }
+- 
+- static int
+--logger_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
+-+_logger(struct skynet_context * context, void *ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
+- 	struct logger * inst = ud;
+--	switch (type) {
+--	case PTYPE_SYSTEM:
+--		if (inst->filename) {
+--			inst->handle = freopen(inst->filename, "a", inst->handle);
+--		}
+--		break;
+--	case PTYPE_TEXT:
+--		fprintf(inst->handle, "[:%08x] ",source);
+--		fwrite(msg, sz , 1, inst->handle);
+--		fprintf(inst->handle, "\n");
+--		fflush(inst->handle);
+--		break;
+--	}
+-+#ifdef _MSC_VER
+-+	fwprintf(inst->handle, L"[:%08x] ",source);
+-+  fwrite(msg, sz, 1, inst->handle);
+-+	fwprintf(inst->handle, L"\n");
+-+#else
+-+	fprintf(inst->handle, "[:%08x] ",source);
+-+	fwrite(msg, sz , 1, inst->handle);
+-+	fprintf(inst->handle, "\n");
+-+#endif
+-+	fflush(inst->handle);
+- 
+- 	return 0;
+- }
+- 
+-+#ifdef _MSC_VER
+-+static int Mkdir(const char* dir) {
+-+	return _mkdir(dir);
+-+}
+-+#else
+-+static int Mkdir(const char* dir) {
+-+	return mkdir(dir, 0777);
+-+}
+-+#endif
+-+
+- int
+- logger_init(struct logger * inst, struct skynet_context *ctx, const char * parm) {
+- 	if (parm) {
+--		inst->handle = fopen(parm,"w");
+-+		//log文件名中加入pid和时间信息；
+-+		time_t now = time(NULL);
+-+		char Time[32] = { 0 };
+-+		strftime(Time, 20, "%Y%m%d_%H%M%S", localtime(&now));
+-+
+-+		const char * logpath = skynet_getenv("logpath");
+-+		Mkdir(logpath);
+-+
+-+		char logfile[256];
+-+		snprintf(logfile, sizeof(logfile), "%s/%s_%u_%s.%s", logpath, parm, getpid(), Time, "log");
+-+
+-+		inst->handle = fopen(logfile, "w");
+- 		if (inst->handle == NULL) {
+- 			return 1;
+- 		}
+--		inst->filename = skynet_malloc(strlen(parm)+1);
+--		strcpy(inst->filename, parm);
+- 		inst->close = 1;
+- 	} else {
+- 		inst->handle = stdout;
+- 	}
+-+#ifdef _MSC_VER
+-+	_wsetlocale(0, L"chs");
+-+#endif
+- 	if (inst->handle) {
+--		skynet_callback(ctx, inst, logger_cb);
+-+		skynet_callback(ctx, inst, _logger);
+- 		skynet_command(ctx, "REG", ".logger");
+- 		return 0;
+- 	}
+-Index: service_snlua.c
+-===================================================================
+---- service_snlua.c	(revision 16373)
+-+++ service_snlua.c	(working copy)
+-@@ -199,7 +199,7 @@
+- 	if (signal == 0) {
+- #ifdef lua_checksig
+- 	// If our lua support signal (modified lua version by skynet), trigger it.
+--	skynet_sig_L = l->L;
+-+  skynet_lua_signal(l->L);
+- #endif
+- 	} else if (signal == 1) {
+- 		skynet_error(l->ctx, "Current Memory %.3fK", (float)l->mem / 1024);
+diff --git a/src/skynet/service-src/service_gate.c b/src/skynet/service-src/service_gate.c
+index b8da744..d4059fa 100644
+--- a/src/skynet/service-src/service_gate.c
++++ b/src/skynet/service-src/service_gate.c
+@@ -88,7 +88,12 @@ _forward_agent(struct gate * g, int fd, uint32_t agentaddr, uint32_t clientaddr)
+ static void
+ _ctrl(struct gate * g, const void * msg, int sz) {
+ 	struct skynet_context * ctx = g->ctx;
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char tmp[1024+1];
++#else
+ 	char tmp[sz+1];
++#endif
+ 	memcpy(tmp, msg, sz);
+ 	tmp[sz] = '\0';
+ 	char * command = tmp;
+@@ -284,7 +289,7 @@ _cb(struct skynet_context * ctx, void * ud, int type, int session, uint32_t sour
+ 			break;
+ 		}
+ 		// The last 4 bytes in msg are the id of socket, write following bytes to it
+-		const uint8_t * idbuf = msg + sz - 4;
++		const uint8_t * idbuf = (const uint8_t *)msg + sz - 4;
+ 		uint32_t uid = idbuf[0] | idbuf[1] << 8 | idbuf[2] << 16 | idbuf[3] << 24;
+ 		int id = hashid_lookup(&g->hash, uid);
+ 		if (id>=0) {
+@@ -340,8 +345,14 @@ gate_init(struct gate *g , struct skynet_context * ctx, char * parm) {
+ 		return 1;
+ 	int max = 0;
+ 	int sz = strlen(parm)+1;
++#ifdef _MSC_VER
++	assert(sz <= 1024);
++	char watchdog[1024];
++	char binding[1024];
++#else
+ 	char watchdog[sz];
+ 	char binding[sz];
++#endif
+ 	int client_tag = 0;
+ 	char header;
+ 	int n = sscanf(parm, "%c %s %s %d %d", &header, watchdog, binding, &client_tag, &max);
+diff --git a/src/skynet/service-src/service_harbor.c b/src/skynet/service-src/service_harbor.c
+index 3e722fa..ee9c823 100644
+--- a/src/skynet/service-src/service_harbor.c
++++ b/src/skynet/service-src/service_harbor.c
+@@ -345,7 +345,7 @@ static void
+ dispatch_name_queue(struct harbor *h, struct keyvalue * node) {
+ 	struct harbor_msg_queue * queue = node->queue;
+ 	uint32_t handle = node->value;
+-	int harbor_id = handle >> HANDLE_REMOTE_SHIFT;
++  uint32_t harbor_id = handle >> HANDLE_REMOTE_SHIFT;
+ 	struct skynet_context * context = h->ctx;
+ 	struct slave *s = &h->s[harbor_id];
+ 	int fd = s->fd;
+@@ -606,7 +606,12 @@ harbor_command(struct harbor * h, const char * msg, size_t sz, int session, uint
+ 	}
+ 	case 'S' :
+ 	case 'A' : {
++#ifdef _MSC_VER
++		assert(s <= 1024);
++		char buffer[1024+1];
++#else
+ 		char buffer[s+1];
++#endif
+ 		memcpy(buffer, name, s);
+ 		buffer[s] = 0;
+ 		int fd=0, id=0;
+diff --git a/src/skynet/service-src/service_logger.c b/src/skynet/service-src/service_logger.c
+index e73300e..76b5da2 100644
+--- a/src/skynet/service-src/service_logger.c
++++ b/src/skynet/service-src/service_logger.c
+@@ -1,13 +1,18 @@
+ #include "skynet.h"
++#include "skynet_env.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stdint.h>
+-#include <string.h>
++#include <time.h>
+ 
++#ifdef _MSC_VER
++#include <direct.h>
++#include <Windows.h>
++#include <locale.h>
++#endif
+ struct logger {
+ 	FILE * handle;
+-	char * filename;
+ 	int close;
+ };
+ 
+@@ -16,8 +21,6 @@ logger_create(void) {
+ 	struct logger * inst = skynet_malloc(sizeof(*inst));
+ 	inst->handle = NULL;
+ 	inst->close = 0;
+-	inst->filename = NULL;
+-
+ 	return inst;
+ }
+ 
+@@ -26,45 +29,63 @@ logger_release(struct logger * inst) {
+ 	if (inst->close) {
+ 		fclose(inst->handle);
+ 	}
+-	skynet_free(inst->filename);
+ 	skynet_free(inst);
+ }
+ 
+ static int
+-logger_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
++_logger(struct skynet_context * context, void *ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
+ 	struct logger * inst = ud;
+-	switch (type) {
+-	case PTYPE_SYSTEM:
+-		if (inst->filename) {
+-			inst->handle = freopen(inst->filename, "a", inst->handle);
+-		}
+-		break;
+-	case PTYPE_TEXT:
+-		fprintf(inst->handle, "[:%08x] ",source);
+-		fwrite(msg, sz , 1, inst->handle);
+-		fprintf(inst->handle, "\n");
+-		fflush(inst->handle);
+-		break;
+-	}
++#ifdef _MSC_VER
++	fwprintf(inst->handle, L"[:%08x] ",source);
++  fwrite(msg, sz, 1, inst->handle);
++	fwprintf(inst->handle, L"\n");
++#else
++	fprintf(inst->handle, "[:%08x] ",source);
++	fwrite(msg, sz , 1, inst->handle);
++	fprintf(inst->handle, "\n");
++#endif
++	fflush(inst->handle);
+ 
+ 	return 0;
+ }
+ 
++#ifdef _MSC_VER
++static int Mkdir(const char* dir) {
++	return _mkdir(dir);
++}
++#else
++static int Mkdir(const char* dir) {
++	return mkdir(dir, 0777);
++}
++#endif
++
+ int
+ logger_init(struct logger * inst, struct skynet_context *ctx, const char * parm) {
+ 	if (parm) {
+-		inst->handle = fopen(parm,"w");
++		//log文件名中加入pid和时间信息；
++		time_t now = time(NULL);
++		char Time[32] = { 0 };
++		strftime(Time, 20, "%Y%m%d_%H%M%S", localtime(&now));
++
++		const char * logpath = skynet_getenv("logpath");
++		Mkdir(logpath);
++
++		char logfile[256];
++		snprintf(logfile, sizeof(logfile), "%s/%s_%u_%s.%s", logpath, parm, getpid(), Time, "log");
++
++		inst->handle = fopen(logfile, "w");
+ 		if (inst->handle == NULL) {
+ 			return 1;
+ 		}
+-		inst->filename = skynet_malloc(strlen(parm)+1);
+-		strcpy(inst->filename, parm);
+ 		inst->close = 1;
+ 	} else {
+ 		inst->handle = stdout;
+ 	}
++#ifdef _MSC_VER
++	_wsetlocale(0, L"chs");
++#endif
+ 	if (inst->handle) {
+-		skynet_callback(ctx, inst, logger_cb);
++		skynet_callback(ctx, inst, _logger);
+ 		skynet_command(ctx, "REG", ".logger");
+ 		return 0;
+ 	}
+diff --git a/src/skynet/service-src/service_snlua.c b/src/skynet/service-src/service_snlua.c
+index 6f2ea6c..f2b9745 100644
+--- a/src/skynet/service-src/service_snlua.c
++++ b/src/skynet/service-src/service_snlua.c
+@@ -199,7 +199,7 @@ snlua_signal(struct snlua *l, int signal) {
+ 	if (signal == 0) {
+ #ifdef lua_checksig
+ 	// If our lua support signal (modified lua version by skynet), trigger it.
+-	skynet_sig_L = l->L;
++  skynet_lua_signal(l->L);
+ #endif
+ 	} else if (signal == 1) {
+ 		skynet_error(l->ctx, "Current Memory %.3fK", (float)l->mem / 1024);

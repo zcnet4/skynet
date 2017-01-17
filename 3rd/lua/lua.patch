@@ -1,0 +1,39 @@
+diff --git a/src/skynet/3rd/lua/lua.h b/src/skynet/3rd/lua/lua.h
+index 24a8886..24a6051 100644
+--- a/src/skynet/3rd/lua/lua.h
++++ b/src/skynet/3rd/lua/lua.h
+@@ -462,7 +462,7 @@ struct lua_Debug {
+ 
+ /* Add by skynet */
+ 
+-LUA_API lua_State * skynet_sig_L;
++LUA_API void skynet_lua_signal(lua_State * L);
+ LUA_API void (lua_checksig_)(lua_State *L);
+ #define lua_checksig(L) if (skynet_sig_L) { lua_checksig_(L); }
+ 
+diff --git a/src/skynet/3rd/lua/luaconf.h b/src/skynet/3rd/lua/luaconf.h
+index f37bea0..b62afe3 100644
+--- a/src/skynet/3rd/lua/luaconf.h
++++ b/src/skynet/3rd/lua/luaconf.h
+@@ -780,4 +780,6 @@
+ 
+ 
+ #endif
+-
++#ifdef _MSC_VER
++#include <unistd.h>
++#endif
+diff --git a/src/skynet/3rd/lua/lvm.c b/src/skynet/3rd/lua/lvm.c
+index c5fd165..afeb67d 100644
+--- a/src/skynet/3rd/lua/lvm.c
++++ b/src/skynet/3rd/lua/lvm.c
+@@ -65,6 +65,9 @@
+ 
+ /* Add by skynet */
+ lua_State * skynet_sig_L = NULL;
++void skynet_lua_signal(lua_State * L) {
++  skynet_sig_L = L;
++}
+ 
+ LUA_API void
+ lua_checksig_(lua_State *L) {

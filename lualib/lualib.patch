@@ -1,0 +1,134 @@
+diff --git a/src/skynet/lualib/mysql.lua b/src/skynet/lualib/mysql.lua
+index afa7642..ec2f2e2 100644
+--- a/src/skynet/lualib/mysql.lua
++++ b/src/skynet/lualib/mysql.lua
+@@ -31,6 +31,7 @@ local STATE_CONNECTED = 1
+ local STATE_COMMAND_SENT = 2
+ 
+ local COM_QUERY = 0x03
++local COM_PING = 0x0E
+ 
+ local SERVER_MORE_RESULTS_EXISTS = 8
+ 
+@@ -649,7 +650,10 @@ function _M.connect(opts)
+     return self
+ end
+ 
+-
++function _M.reconnect()
++    self.sockchannel:close()
++    self.sockchannel:connect(true)
++end
+ 
+ function _M.disconnect(self)
+     self.sockchannel:close()
+@@ -679,5 +683,20 @@ function _M.set_compact_arrays(self, value)
+     self.compact = value
+ end
+ 
++function _M.ping(self)
++    self.packet_no = -1
++    local querypacket = _compose_packet(self, strchar(COM_PING), 1)
++
++    local sockchannel = self.sockchannel
++    if not self.query_resp then
++        self.query_resp = _query_resp(self)
++    end
++
++    local ret = sockchannel:request(querypacket, self.query_resp)
++    if ret.badresult then
++        return false
++    end
++    return true
++end
+ 
+ return _M
+diff --git a/src/skynet/lualib/redis.lua b/src/skynet/lualib/redis.lua
+index 949023a..5939d10 100644
+--- a/src/skynet/lualib/redis.lua
++++ b/src/skynet/lualib/redis.lua
+@@ -177,6 +177,27 @@ function command:sismember(key, value)
+ 	return fd:request(compose_message ("SISMEMBER", {key, value}), read_boolean)
+ end
+ 
++function command:ping()
++	local fd = self[1]
++	local ping_cmd = {"*1", command_cache["ping"], "\r\n"}
++
++	return fd:request(ping_cmd, function(so)
++		local ok, res = read_response(so)
++		if ok and "PONG" == res then
++			res = true
++		else
++			print(res)
++			res = false
++		end
++		return ok, res
++	end)
++end
++
++function command:reconnect()
++	self[1]:close()
++    self[1]:connect(true)
++end
++
+ local function compose_table(lines, msg)
+ 	local tinsert = table.insert
+ 	tinsert(lines, count_cache[#msg])
+diff --git a/src/skynet/lualib/skynet.lua b/src/skynet/lualib/skynet.lua
+index 4cefc89..cbdde20 100644
+--- a/src/skynet/lualib/skynet.lua
++++ b/src/skynet/lualib/skynet.lua
+@@ -532,7 +532,7 @@ function skynet.uniqueservice(global, ...)
+ 	if global == true then
+ 		return assert(skynet.call(".service", "lua", "GLAUNCH", ...))
+ 	else
+-		return assert(skynet.call(".service", "lua", "LAUNCH", global, ...))
++		return assert(skynet.call(".service", "lua", "LAUNCH", ...))
+ 	end
+ end
+ 
+@@ -540,7 +540,7 @@ function skynet.queryservice(global, ...)
+ 	if global == true then
+ 		return assert(skynet.call(".service", "lua", "GQUERY", ...))
+ 	else
+-		return assert(skynet.call(".service", "lua", "QUERY", global, ...))
++		return assert(skynet.call(".service", "lua", "QUERY", ...))
+ 	end
+ end
+ 
+diff --git a/src/skynet/lualib/skynet/manager.lua b/src/skynet/lualib/skynet/manager.lua
+index 4365d2e..09b6090 100644
+--- a/src/skynet/lualib/skynet/manager.lua
++++ b/src/skynet/lualib/skynet/manager.lua
+@@ -30,7 +30,7 @@ local function globalname(name, handle)
+ 	assert(#name <= 16)	-- GLOBALNAME_LENGTH is 16, defined in skynet_harbor.h
+ 	assert(tonumber(name) == nil)	-- global name can't be number
+ 
+-	local harbor = require "skynet.harbor"
++	local harbor = require "skynet.harbor2"
+ 
+ 	harbor.globalname(name, handle)
+ 
+diff --git a/src/skynet/lualib/socketchannel.lua b/src/skynet/lualib/socketchannel.lua
+index fa72b89..67a53ea 100644
+--- a/src/skynet/lualib/socketchannel.lua
++++ b/src/skynet/lualib/socketchannel.lua
+@@ -305,7 +305,7 @@ end
+ 
+ local function block_connect(self, once)
+ 	local r = check_connection(self)
+-	if r ~= nil then
++	if r then
+ 		return r
+ 	end
+ 	local err
+@@ -327,7 +327,7 @@ local function block_connect(self, once)
+ 	end
+ 
+ 	r = check_connection(self)
+-	if r == nil then
++	if not r then
+ 		skynet.error(string.format("Connect to %s:%d failed (%s)", self.__host, self.__port, err))
+ 		error(socket_error)
+ 	else

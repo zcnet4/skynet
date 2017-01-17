@@ -1,0 +1,19 @@
+EXPORTS
+  skynet_memory_init
+  skynet_malloc
+  skynet_calloc
+  skynet_realloc
+  skynet_free
+  skynet_strdup
+	skynet_lalloc
+
+  malloc_used_memory
+	malloc_memory_block
+	memory_info_dump
+	mallctl_int64
+	mallctl_opt
+	dump_c_mem
+	dump_mem_lua
+  malloc_current_memory
+
+	luaopen_memory
