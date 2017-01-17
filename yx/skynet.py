@@ -15,10 +15,10 @@ def isLinuxSystem():
     return 'Linux' in platform.system()
 
 script_dir = os.path.split(os.path.abspath(sys.argv[0]))[0]
-skynet_dir = script_dir ##os.getcwd())
-build_dir = os.path.join(os.path.dirname(os.path.dirname(skynet_dir)), "build")
+skynet_dir = os.path.dirname(script_dir)
+build_dir = os.path.join(os.path.dirname(skynet_dir), "build")
 if isLinuxSystem():
-	build_dir = os.path.join(os.path.dirname(os.path.dirname(skynet_dir)), "build_linux")
+	build_dir = os.path.join(os.path.dirname(skynet_dir), "build_linux")
 
 def prepare_env():
 	if isWindowsSystem():
@@ -42,8 +42,13 @@ def prepare_env():
 		files = ["memory.so", "skynet.so", "protobuf.so"]
 		for f in files:
 			src_file = os.path.join(build_dir, "Debug", "lib.target", f)
-			dst_file = os.path.join(build_dir, "Debug", f)
-			shutil.copyfile(src_file, dst_file)
+			if os.path.exists(src_file) :
+				dst_file = os.path.join(build_dir, "Debug", f)
+				shutil.copyfile(src_file, dst_file)
+			src_file = os.path.join(build_dir, "Release", "lib.target", f)
+			if os.path.exists(src_file) :
+				dst_file = os.path.join(build_dir, "Release", f)
+				shutil.copyfile(src_file, dst_file)
 		pass
 
 	## 设置skynet工作目录。
@@ -83,9 +88,6 @@ def start_master(opts):
 	#configs =["yx/conf/master.conf"]
 	run_skynet(skynet, configs)
 
-def start_slave(opts):
-	print("start_slave")
-
 def _parse_arguments():
 	"""Parse the sys.argv command-line arguments, returning the options."""
 	import optparse
@@ -98,7 +100,6 @@ def _parse_arguments():
 def main(opts):
 	prepare_env();
 	start_master(opts);
-	start_slave(opts);
 
 def test_main(opts):
 	prepare_env()
