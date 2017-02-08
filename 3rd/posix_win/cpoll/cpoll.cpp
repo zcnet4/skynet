@@ -232,7 +232,7 @@ int cpoll_ctl(int cpfd, int opcode, int fd, struct cpoll_event* event)
         fds[i].event = *event;
         fds[i].event.events |= CPOLLHUP;
         fds[i].event.events |= CPOLLERR;
-        WSAEventSelect(fds[i].fd, cpi.wsa_events[i], FD_ACCEPT | get_wsa_mask(fds[i].event.events));
+        WSAEventSelect(fds[i].fd, cpi.wsa_events[i], FD_ACCEPT | FD_CONNECT | get_wsa_mask(fds[i].event.events));
         return 0;
       }
     }
