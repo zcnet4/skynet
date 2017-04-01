@@ -6,17 +6,20 @@ BUILDTYPE=Release
 #DST=skynet-${BUILDTYPE}-0.0
 DST=skynet-0.0
 
+pushd .
+
 # gen
+cd ${WORKDIR}/skynet
 python ${WORKDIR}/build/gyp.py -D"component=shared_library" skynet.gyp
 # build
 BUILDTYPE=${BUILDTYPE} make -j 4 -C ${WORKDIR}/build_linux
 
-pushd .
+# package
 cd ${WORKDIR}/build_linux
 rm -rf ${DST}
 mkdir ${DST}
-
 mkdir ${DST}/bin
+
 # 复制第三方so
 #cp ${WORKDIR}/3rd/libstdc++.so.6.0.21 ${DST}/bin
 
@@ -38,4 +41,5 @@ tar -czf ${DST}.tar.gz ${DST}
 cp ${DST}.tar.gz ${WORKDIR}
 
 popd
+
 
