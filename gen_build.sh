@@ -3,12 +3,13 @@
 WORKDIR=`pwd`/..
 BUILDTYPE=Release
 #BUILDTYPE=Debug 
+#DST=skynet-${BUILDTYPE}-0.0
 DST=skynet-0.0
 
 # gen
 python ${WORKDIR}/build/gyp.py -D"component=shared_library" skynet.gyp
 # build
-make -j 4 -C ${WORKDIR}/build_linux
+BUILDTYPE=${BUILDTYPE} make -j 4 -C ${WORKDIR}/build_linux
 
 pushd .
 cd ${WORKDIR}/build_linux
