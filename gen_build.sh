@@ -1,14 +1,40 @@
 #!/bin/bash
 
 WORKDIR=`pwd`/..
+BUILDTYPE=Release
+#BUILDTYPE=Debug 
+DST=skynet-0.0
 
+# gen
+python ${WORKDIR}/build/gyp.py -D"component=shared_library" skynet.gyp
+# build
+make -j 4 -C ${WORKDIR}/build_linux
 
-python ${WORKDIR}/build/gyp.py -D"component=shared_library" skynet/skynet.gyp
-BUILDTYPE=Release make -j 4 -C ${WORKDIR}/build_linux
-#BUILDTYPE=Debug make -j 4 -C ${WORKDIR}/build_linux
+pushd .
+cd ${WORKDIR}/build_linux
+rm -rf ${DST}
+mkdir ${DST}
 
-#cp ${WORKDIR}/3rd/libstdc++.so.6.0.21 ${WORKDIR}/build_linux/${BUILDTYPE}/libstdc++.so.6.0.21
-#cp ${WORKDIR}/3rd/glog/lib/linux/libglog.so.0 ${WORKDIR}/build_linux/${BUILDTYPE}/libglog.so.0
-#cp ${WORKDIR}/3rd/gperftools-2.5/lib/linux/libunwind.so.8 ${WORKDIR}/build_linux/${BUILDTYPE}/libunwind.so.8
-#cp ${WORKDIR}/3rd/gperftools-2.5/.libs/libtcmalloc_and_profiler.so.4 ${WORKDIR}/build_linux/${BUILDTYPE}/libtcmalloc_and_profiler.so.4
+mkdir ${DST}/bin
+# 复制第三方so
+#cp ${WORKDIR}/3rd/libstdc++.so.6.0.21 ${DST}/bin
+
+# 复制
+cp ${BUILDTYPE}/skynet ${DST}/bin
+cp ${BUILDTYPE}/*.so ${DST}/bin
+cp -r ${BUILDTYPE}/lib.target ${DST}/bin
+cp ${BUILDTYPE}/lib.target/memory.so ${DST}/bin
+cp ${BUILDTYPE}/lib.target/skynet.so ${DST}/bin
+cp ${BUILDTYPE}/lib.target/protobuf.so ${DST}/bin
+
+# 复制skynet系统脚本
+mkdir ${DST}/skynet_script
+cp -r ${WORKDIR}/skynet/lualib ${DST}/skynet_script/lualib
+cp -r ${WORKDIR}/skynet/service ${DST}/skynet_script/service
+#cp -r ${WORKDIR}/skynet_script/yx ${DST}/skynet_script/yx
+
+tar -czf ${DST}.tar.gz ${DST}
+cp ${DST}.tar.gz ${WORKDIR}
+
+popd
 
